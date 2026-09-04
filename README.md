@@ -91,3 +91,12 @@ measured rather than guessed at.
 - `main/display.c` — CO5300 bring-up and the band-buffer DMA pipeline.
 - `main/touch.c`, `main/boot_button.c` — the two inputs.
 - `main/config.h` — geometry, colours, brightness.
+
+## Credits
+
+All of the character design and animation — the blob's shapes, expressions,
+timings, easings, and motion — comes from **[jeremy-prt/bloub](https://github.com/jeremy-prt/bloub)**.
+This project is a port of that work to ESP32-S3 hardware; the constants that
+give every state its feel were measured from and carried over faithfully from
+the original. Full credit and thanks to [Jeremy](https://github.com/jeremy-prt)
+for creating Bloub.
