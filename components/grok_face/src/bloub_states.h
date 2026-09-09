@@ -7,37 +7,50 @@
 #include "bloub_face.h"
 #include "bloub_shapes.h"
 
-// The 13-state catalogue, ported from bloub's src/bot/states.ts.
+// The 15-state catalogue, ported from bloub's src/bot/states.ts.
 //
 // Everything here is in ball-radius units and stays unscaled: the engine
 // multiplies by the on-screen ball radius once, uniformly, at render time —
 // exactly like the source engine's own `R` scale, applied in `sample()`
 // rather than in each state's `pose()`.
 //
-// Not ported deliberately: the customiser's shape/expression override
-// (`baseBody`/`baseFace`) and pointer-driven gaze (`Look`). Cross-fade
-// blending and idle liveliness are kept.
+// A state declares whether it carries the RESTING BODY and the RESTING FACE.
+// Those two flags are what let the customiser's shape and expression replace
+// them; everywhere else the silhouette is the animation and must not be
+// overwritten. The engine reads the flags, the catalogue only declares them.
 
-typedef grok_face_expression_t bloub_state_id_t;
+typedef grok_face_state_t bloub_state_id_t;
 
-#define STATE_IDLE GROK_FACE_IDLE
-#define STATE_THINKING GROK_FACE_THINKING
-#define STATE_WINK GROK_FACE_WINK
-#define STATE_WIDE GROK_FACE_WIDE
-#define STATE_ALERT GROK_FACE_ALERT
-#define STATE_NOTIFY GROK_FACE_NOTIFY
-#define STATE_SLEEP GROK_FACE_SLEEP
-#define STATE_EGG GROK_FACE_EGG
-#define STATE_HEXAGON GROK_FACE_HEXAGON
-#define STATE_PLAY GROK_FACE_PLAY
-#define STATE_ORBIT GROK_FACE_ORBIT
-#define STATE_BURST GROK_FACE_BURST
-#define STATE_COMET GROK_FACE_COMET
-#define STATE_COUNT GROK_FACE_EXPRESSION_COUNT
+#define STATE_IDLE GROK_FACE_STATE_IDLE
+#define STATE_THINKING GROK_FACE_STATE_THINKING
+#define STATE_WINK GROK_FACE_STATE_WINK
+#define STATE_WIDE GROK_FACE_STATE_WIDE
+#define STATE_ALERT GROK_FACE_STATE_ALERT
+#define STATE_NOTIFY GROK_FACE_STATE_NOTIFY
+#define STATE_EXCLAIM GROK_FACE_STATE_EXCLAIM
+#define STATE_SLEEP GROK_FACE_STATE_SLEEP
+#define STATE_EGG GROK_FACE_STATE_EGG
+#define STATE_HEXAGON GROK_FACE_STATE_HEXAGON
+#define STATE_PLAY GROK_FACE_STATE_PLAY
+#define STATE_ORBIT GROK_FACE_STATE_ORBIT
+#define STATE_BURST GROK_FACE_STATE_BURST
+#define STATE_COMET GROK_FACE_STATE_COMET
+#define STATE_SWIRL GROK_FACE_STATE_SWIRL
+#define STATE_COUNT GROK_FACE_STATE_COUNT
 
 typedef struct {
     float w, h;   // ball-radius units
     float open;   // 1 = open, 0 = closed
+    /**
+     * The capsule's own lean, in degrees, positive = its top goes right.
+     * Applied AFTER the sphere's tangent frame. Without it both eyes must lean
+     * the same way (that is all head roll can do), which puts anger and sadness
+     * out of reach: they need MIRRORED leans.
+     *
+     * Every state measured off the video leaves this at zero; it is the
+     * expressions that use it.
+     */
+    float tilt;
 } eye_cfg_t;
 
 // A single state needs 5 dots and 6 arcs at most. A pose being cross-faded
@@ -80,6 +93,20 @@ void bloub_pose_sample(bloub_state_id_t id, float t, pose_t *out);
 
 /** True if entering this state should be masked by a forced blink, like the reference video. */
 bool bloub_state_blink_in(bloub_state_id_t id);
+
+/**
+ * True if this state's silhouette is the RESTING body, so a chosen shape may
+ * replace it. False for every state that draws its own shape: there the
+ * silhouette is the animation.
+ */
+bool bloub_state_base_body(bloub_state_id_t id);
+
+/**
+ * True if this state wears the RESTING face, so a chosen expression may replace
+ * it. Only `idle` and `swirl`: the other states with a face have one measured
+ * off the video, and reproducing those is the point.
+ */
+bool bloub_state_base_face(bloub_state_id_t id);
 
 /**
  * Period on which to restart this state's local clock, or 0 to let it run
