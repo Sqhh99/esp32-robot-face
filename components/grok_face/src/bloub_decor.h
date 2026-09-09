@@ -59,7 +59,7 @@ extern const particle_seed_t BLOUB_PARTICLES[5];
 typedef struct {
     capsule_t cap;
     float min_x, max_x, min_y, max_y;
-    uint16_t color;     // panel-ordered, full brightness (used when alpha == 255)
+    uint16_t color;     // transport-ordered, full brightness (used when alpha == 255)
     uint16_t color_cpu; // CPU-ordered, for compositing when alpha < 255
     uint8_t alpha;      // the arc's fade, composited per pixel
     bool behind;        // true = must be painted before the body (occluded by it)
@@ -80,7 +80,8 @@ typedef struct {
  * Returns the number of stamps written (<= ARC_MAX_STAMPS).
  */
 int arc_generate_stamps(const arc_seed_t *seed, float t, float scale_px, float origin_x,
-                         float origin_y, float opacity, arc_stamp_t *out);
+                        float origin_y, float opacity, bool swap_color_bytes,
+                        arc_stamp_t *out);
 
 typedef struct {
     float x, y; // ball-radius units, relative to ball centre (engine scales to px)

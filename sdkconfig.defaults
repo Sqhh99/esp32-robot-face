@@ -16,7 +16,7 @@ CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ=240
 
 CONFIG_COMPILER_OPTIMIZATION_PERF=y
 
-# 1 kHz tick so the render loop and input polling can pace themselves precisely.
+# 1 kHz tick so the render loop and automatic state timer can pace themselves precisely.
 CONFIG_FREERTOS_HZ=1000
 
 CONFIG_ESP_MAIN_TASK_STACK_SIZE=6144

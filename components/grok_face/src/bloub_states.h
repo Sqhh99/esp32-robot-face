@@ -2,40 +2,38 @@
 
 #include <stdbool.h>
 
+#include "grok_face.h"
 #include "bloub_decor.h"
 #include "bloub_face.h"
 #include "bloub_shapes.h"
 
-// The 14-state catalogue, ported from bloub's src/bot/states.ts.
+// The 13-state catalogue, ported from bloub's src/bot/states.ts.
 //
 // Everything here is in ball-radius units and stays unscaled: the engine
 // multiplies by the on-screen ball radius once, uniformly, at render time —
 // exactly like the source engine's own `R` scale, applied in `sample()`
 // rather than in each state's `pose()`.
 //
-// Not ported, deliberately (see the chat that scoped this): cross-fade
-// blending between states (`blendPose`/`morph` — we cut instead), the
-// customiser's shape/expression override (`baseBody`/`baseFace` — always
-// false for us, since there is no customiser), and pointer-driven gaze
-// (`Look` — no mouse here). Idle liveliness (blink schedule + tiny gaze
-// drift) is kept; see bloub_face.h.
+// Not ported deliberately: the customiser's shape/expression override
+// (`baseBody`/`baseFace`) and pointer-driven gaze (`Look`). Cross-fade
+// blending and idle liveliness are kept.
 
-typedef enum {
-    STATE_IDLE = 0,
-    STATE_THINKING,
-    STATE_WINK,
-    STATE_WIDE,
-    STATE_ALERT,
-    STATE_NOTIFY,
-    STATE_SLEEP,
-    STATE_EGG,
-    STATE_HEXAGON,
-    STATE_PLAY,
-    STATE_ORBIT,
-    STATE_BURST,
-    STATE_COMET,
-    STATE_COUNT,
-} bloub_state_id_t;
+typedef grok_face_expression_t bloub_state_id_t;
+
+#define STATE_IDLE GROK_FACE_IDLE
+#define STATE_THINKING GROK_FACE_THINKING
+#define STATE_WINK GROK_FACE_WINK
+#define STATE_WIDE GROK_FACE_WIDE
+#define STATE_ALERT GROK_FACE_ALERT
+#define STATE_NOTIFY GROK_FACE_NOTIFY
+#define STATE_SLEEP GROK_FACE_SLEEP
+#define STATE_EGG GROK_FACE_EGG
+#define STATE_HEXAGON GROK_FACE_HEXAGON
+#define STATE_PLAY GROK_FACE_PLAY
+#define STATE_ORBIT GROK_FACE_ORBIT
+#define STATE_BURST GROK_FACE_BURST
+#define STATE_COMET GROK_FACE_COMET
+#define STATE_COUNT GROK_FACE_EXPRESSION_COUNT
 
 typedef struct {
     float w, h;   // ball-radius units

@@ -1,0 +1,6 @@
+version: "1.0.0"
+
+description: "Band-buffered animated Grok/Bloub face renderer"
+
+dependencies:
+  idf: "6.0.2"

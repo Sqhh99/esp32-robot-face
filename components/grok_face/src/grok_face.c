@@ -1,4 +1,4 @@
-#include "bloub_engine.h"
+#include "grok_face.h"
 
 #include <math.h>
 #include <stdint.h>
@@ -9,12 +9,26 @@
 #include "bloub_math.h"
 #include "bloub_shapes.h"
 #include "bloub_states.h"
-#include "config.h"
-#include "display.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 
-static const char *TAG = "bloub";
+static const char *TAG = "grok_face";
+
+static grok_face_config_t s_config;
+static bool s_initialized;
+
+#define LCD_H_RES (s_config.width)
+#define LCD_V_RES (s_config.height)
+#define BAND_ROWS (s_config.band_rows)
+#define BAND_COUNT (LCD_V_RES / BAND_ROWS)
+#define BALL_CX (s_config.center_x)
+#define BALL_CY (s_config.center_y)
+#define BALL_R (s_config.radius)
+#define COLOR_BG 0x0000
+#define COLOR_FG 0xFFFF
+#define NOTIF_R8 46
+#define NOTIF_G8 232
+#define NOTIF_B8 106
 
 static bloub_state_id_t s_state = STATE_IDLE;
 static bloub_state_id_t s_prev_state = STATE_IDLE;
@@ -95,7 +109,7 @@ static inline void clip_y(int *min_y, int *max_y, int band_y0)
     if (*max_y > band_y0 + BAND_ROWS - 1) *max_y = band_y0 + BAND_ROWS - 1;
 }
 
-/** Flat horizontal run, written 32 bits at a time. Rows are 4-byte aligned (466*2 = 932). */
+/** Flat horizontal run, written 32 bits at a time. Rows are 4-byte aligned (240*2 = 480). */
 static inline void fill_span(uint16_t *row, int xa, int xb, uint16_t color)
 {
     if (xa > xb) return;
@@ -166,7 +180,8 @@ static void draw_stamp(uint16_t *buf, int band_y0, const arc_stamp_t *s)
         } else {
             for (int x = min_x; x <= max_x; x++) {
                 if (capsule_contains(c, (float)x, fy)) {
-                    row[x] = bloub_blend_panel(row[x], s->color_cpu, s->alpha);
+                    row[x] = bloub_blend_panel(row[x], s->color_cpu, s->alpha,
+                                               s_config.swap_color_bytes);
                 }
             }
         }
@@ -203,7 +218,8 @@ static void draw_disc(uint16_t *buf, int band_y0, float cx, float cy, float r, u
             fill_span(row, xa, xb, color_panel);
         } else {
             for (int x = xa; x <= xb; x++) {
-                row[x] = bloub_blend_panel(row[x], color_cpu, alpha);
+                row[x] = bloub_blend_panel(row[x], color_cpu, alpha,
+                                           s_config.swap_color_bytes);
             }
         }
     }
@@ -252,7 +268,7 @@ static pose_t s_pose_blend;
 // away, the burst collapsing) the bands it has just left have to be blanked
 // once, or they keep the previous frame's pixels.
 static int s_prev_band_first = 0;
-static int s_prev_band_last = BAND_COUNT - 1;
+static int s_prev_band_last = 0;
 
 /** Samples one state at its own clock, wrapped if it is a one-shot animation. */
 static void sample_state(bloub_state_id_t id, float elapsed, pose_t *out)
@@ -394,7 +410,7 @@ static void prepare_frame(double now_s, float global_t, frame_t *f)
         if (p->arc_opacity[a] <= MIN_VISIBLE) continue;
         arc_stamp_t tmp[ARC_MAX_STAMPS];
         int n = arc_generate_stamps(&p->arcs[a], p->arc_t, BALL_R, BALL_CX, BALL_CY,
-                                    p->arc_opacity[a], tmp);
+                                    p->arc_opacity[a], s_config.swap_color_bytes, tmp);
         for (int i = 0; i < n && f->stamp_count < (int)(sizeof(f->stamps) / sizeof(f->stamps[0]));
              i++) {
             if (tmp[i].behind) f->any_behind = true;
@@ -468,8 +484,10 @@ static void punch_holes(uint16_t *buf, int band_y0, const frame_t *f)
                 float lx = eye->A * sx + lx_base;
                 float ly = ly_base - eye->C * sx;
                 if (!capsule_contains(&eye->local, lx, ly)) continue;
-                row[x] = (f->eye_alpha == 255) ? COLOR_BG
-                                               : bloub_blend_panel(row[x], 0x0000, f->eye_alpha);
+                row[x] = (f->eye_alpha == 255)
+                             ? COLOR_BG
+                             : bloub_blend_panel(row[x], 0x0000, f->eye_alpha,
+                                                 s_config.swap_color_bytes);
             }
         }
     }
@@ -520,16 +538,32 @@ static void paint_teardrop(uint16_t *buf, int band_y0, const frame_t *f)
             float lx = ux * f->tear_cos + uy * f->tear_sin;
             float ly = -ux * f->tear_sin + uy * f->tear_cos;
             if (!hull2_contains(0.0f, 0.0f, r1, 0.0f, tip, r2, lx, ly)) continue;
-            row[x] = (f->tear_alpha == 255) ? COLOR_FG
-                                            : bloub_blend_panel(row[x], 0xFFFF, f->tear_alpha);
+            row[x] = (f->tear_alpha == 255)
+                         ? COLOR_FG
+                         : bloub_blend_panel(row[x], 0xFFFF, f->tear_alpha,
+                                             s_config.swap_color_bytes);
         }
     }
 }
 
 // --- Public API -----------------------------------------------------------
 
-void bloub_engine_init(void)
+esp_err_t grok_face_init(const grok_face_config_t *config)
 {
+    if (s_initialized) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    if (config == NULL || config->width <= 0 || config->height <= 0 ||
+        config->band_rows <= 0 || (config->width & 1) != 0 ||
+        config->height % config->band_rows != 0 || config->radius <= 0.0f ||
+        !isfinite(config->center_x) || !isfinite(config->center_y) ||
+        !isfinite(config->radius) || config->acquire_buffer == NULL ||
+        config->flush_band == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    s_config = *config;
+
     double now_s = (double)esp_timer_get_time() * 1e-6;
     s_state = STATE_IDLE;
     s_prev_state = STATE_IDLE;
@@ -537,33 +571,79 @@ void bloub_engine_init(void)
     s_state_entered_s = now_s;
     s_prev_entered_s = now_s;
     s_blink_at_s = -10.0;
+    s_prev_band_first = 0;
+    s_prev_band_last = BAND_COUNT - 1;
 
     for (int band = 0; band < BAND_COUNT; band++) {
-        uint16_t *buf = display_acquire_band();
+        uint16_t *buf = s_config.acquire_buffer(s_config.user_ctx);
+        if (buf == NULL) {
+            return ESP_ERR_NO_MEM;
+        }
         memset(buf, 0, BAND_ROWS * LCD_H_RES * sizeof(uint16_t));
-        display_flush_band(band, buf);
+        esp_err_t err =
+            s_config.flush_band(s_config.user_ctx, band * BAND_ROWS, BAND_ROWS, buf);
+        if (err != ESP_OK) {
+            return err;
+        }
     }
 
-    ESP_LOGI(TAG, "bloub ready, state=%s", bloub_state_name(s_state));
+    s_initialized = true;
+    ESP_LOGI(TAG, "ready: %dx%d, band_rows=%d, state=%s",
+             LCD_H_RES, LCD_V_RES, BAND_ROWS, bloub_state_name(s_state));
+    return ESP_OK;
 }
 
-void bloub_engine_next_state(void)
+esp_err_t grok_face_set_expression(grok_face_expression_t expression)
 {
+    if (!s_initialized) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    if (expression < GROK_FACE_IDLE || expression >= GROK_FACE_EXPRESSION_COUNT) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
     double now_s = (double)esp_timer_get_time() * 1e-6;
     s_prev_state = s_state;
     s_prev_entered_s = s_state_entered_s;
     s_has_prev = true;
-    s_state = (bloub_state_id_t)((s_state + 1) % STATE_COUNT);
+    s_state = expression;
     s_state_entered_s = now_s;
     // In the reference, every change of shape is masked by a blink.
     if (bloub_state_blink_in(s_state)) {
         s_blink_at_s = now_s;
     }
     ESP_LOGI(TAG, "-> %s", bloub_state_name(s_state));
+    return ESP_OK;
 }
 
-void bloub_engine_render_frame(void)
+esp_err_t grok_face_next_expression(void)
 {
+    if (!s_initialized) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    return grok_face_set_expression(
+        (grok_face_expression_t)((s_state + 1) % STATE_COUNT));
+}
+
+grok_face_expression_t grok_face_get_expression(void)
+{
+    return s_state;
+}
+
+const char *grok_face_expression_name(grok_face_expression_t expression)
+{
+    if (expression < GROK_FACE_IDLE || expression >= GROK_FACE_EXPRESSION_COUNT) {
+        return "unknown";
+    }
+    return bloub_state_name(expression);
+}
+
+esp_err_t grok_face_render_frame(void)
+{
+    if (!s_initialized) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
     double now_s = (double)esp_timer_get_time() * 1e-6;
     // Wrapped so float precision on the global (blink/drift) clock stays
     // tight even after many hours of continuous uptime; every periodic
@@ -586,7 +666,10 @@ void bloub_engine_render_frame(void)
     for (int band = paint_first; band <= paint_last; band++) {
         int y0 = band * BAND_ROWS;
         int y1 = y0 + BAND_ROWS - 1;
-        uint16_t *buf = display_acquire_band();
+        uint16_t *buf = s_config.acquire_buffer(s_config.user_ctx);
+        if (buf == NULL) {
+            return ESP_ERR_NO_MEM;
+        }
         memset(buf, 0, BAND_ROWS * LCD_H_RES * sizeof(uint16_t));
 
         // 1. Back half of any orbit/swoosh/comet arcs (occluded by the body).
@@ -614,8 +697,8 @@ void bloub_engine_render_frame(void)
         // 6. Notification pastille, on top.
         if (f->has_notif) {
             uint16_t cpu = bloub_rgb565(NOTIF_R8, NOTIF_G8, NOTIF_B8);
-            draw_disc(buf, y0, f->notif_cx, f->notif_cy, f->notif_r, bloub_panel_swap(cpu), cpu,
-                      255);
+            draw_disc(buf, y0, f->notif_cx, f->notif_cy, f->notif_r,
+                      bloub_order565(cpu, s_config.swap_color_bytes), cpu, 255);
         }
 
         // 7. Front half of the arcs, on top of everything.
@@ -625,7 +708,11 @@ void bloub_engine_render_frame(void)
             }
         }
 
-        display_flush_band(band, buf);
+        esp_err_t err =
+            s_config.flush_band(s_config.user_ctx, y0, BAND_ROWS, buf);
+        if (err != ESP_OK) {
+            return err;
+        }
     }
 
     // Frame rate, so the cost of any future change here is measurable rather
@@ -640,4 +727,5 @@ void bloub_engine_render_frame(void)
         s_frames = 0;
         s_stats_at = now_s;
     }
+    return ESP_OK;
 }

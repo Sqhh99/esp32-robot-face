@@ -8,6 +8,7 @@
 // measured/derived rationale behind the easing curves and the noise mix.
 
 #include <math.h>
+#include <stdbool.h>
 #include <stdint.h>
 
 #define BLOUB_TAU (6.28318530717958647692f)
@@ -72,26 +73,21 @@ static inline float bloub_rng_next(uint32_t *state)
  * reference video: S 45-62%, L 50-67%), returned as RGB565. Matches
  * decor.ts's `wheel()`.
  */
-/**
- * The panel takes RGB565 with the bytes the other way round from how the CPU
- * stores a uint16, so every colour is swapped once here, at the point it is
- * built. Pure white and pure black are palindromes and come through either
- * way, which is exactly why this was invisible until a saturated colour (the
- * notification pastille) turned up on screen as orange instead of blue.
- *
- * Everything downstream of these builders is already panel-ordered, so
- * nothing in the render loop pays for it. The corollary is that mixing
- * colours (fades) must happen BEFORE the swap — see bloub_blend565.
- */
+/** Swaps the two bytes of an RGB565 pixel for panels that expect MSB first. */
 static inline uint16_t bloub_panel_swap(uint16_t c)
 {
     return (uint16_t)((c >> 8) | (c << 8));
 }
 
+static inline uint16_t bloub_order565(uint16_t c, bool swap_bytes)
+{
+    return swap_bytes ? bloub_panel_swap(c) : c;
+}
+
 /**
  * Blends `src` over `dst` by `a` (0-255), in RGB565.
  *
- * Operates on CPU-ordered values, so call it before bloub_panel_swap. Used
+ * Operates on CPU-ordered values, so call it before bloub_order565. Used
  * to bake a fade into a shape's colour once per frame, never per pixel.
  */
 static inline uint16_t bloub_blend565(uint16_t dst, uint16_t src, uint32_t a)
@@ -103,14 +99,15 @@ static inline uint16_t bloub_blend565(uint16_t dst, uint16_t src, uint32_t a)
     return (uint16_t)((r << 11) | (g << 5) | b);
 }
 
-/** CPU-ordered RGB565. Pass through bloub_panel_swap before it reaches a buffer. */
+/** CPU-ordered RGB565. Pass through bloub_order565 before it reaches a buffer. */
 static inline uint16_t bloub_rgb565(uint8_t r, uint8_t g, uint8_t b)
 {
     return (uint16_t)(((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3));
 }
 
 /**
- * Composites a CPU-ordered colour onto a panel-ordered destination pixel.
+ * Composites a CPU-ordered colour onto a destination pixel in configured
+ * transport byte order.
  *
  * This is what a fade has to be. Scaling a colour toward black instead is
  * only equivalent where the background actually is black: over the white
@@ -119,9 +116,11 @@ static inline uint16_t bloub_rgb565(uint8_t r, uint8_t g, uint8_t b)
  * only on pixels that are genuinely translucent — a fully opaque shape takes
  * the plain-store path in the caller.
  */
-static inline uint16_t bloub_blend_panel(uint16_t dst_panel, uint16_t src_cpu, uint32_t a)
+static inline uint16_t bloub_blend_panel(uint16_t dst_panel, uint16_t src_cpu, uint32_t a,
+                                         bool swap_bytes)
 {
-    return bloub_panel_swap(bloub_blend565(bloub_panel_swap(dst_panel), src_cpu, a));
+    uint16_t dst_cpu = bloub_order565(dst_panel, swap_bytes);
+    return bloub_order565(bloub_blend565(dst_cpu, src_cpu, a), swap_bytes);
 }
 
 static inline uint16_t bloub_wheel565(float hue_deg)

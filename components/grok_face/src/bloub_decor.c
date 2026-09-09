@@ -37,7 +37,8 @@ const particle_seed_t BLOUB_PARTICLES[5] = {
 };
 
 int arc_generate_stamps(const arc_seed_t *seed, float t, float scale_px, float origin_x,
-                         float origin_y, float opacity, arc_stamp_t *out)
+                        float origin_y, float opacity, bool swap_color_bytes,
+                        arc_stamp_t *out)
 {
     if (opacity <= 0.02f) {
         return 0;
@@ -81,7 +82,7 @@ int arc_generate_stamps(const arc_seed_t *seed, float t, float scale_px, float o
         s->max_y = fmaxf(py[i], py[i + 1]) + radius;
         uint16_t cpu = bloub_wheel565(hue);
         s->color_cpu = cpu;
-        s->color = bloub_panel_swap(cpu);
+        s->color = bloub_order565(cpu, swap_color_bytes);
         s->alpha = (uint8_t)alpha;
         s->behind = behind_a;
     }

@@ -1,102 +1,85 @@
-# Bloub on an ESP32-S3 AMOLED
+# Bloub on an ESP32-S3 ST7789 LCD
 
-A port of [jeremy-prt/bloub](https://github.com/jeremy-prt/bloub) — an animated
-"blob" character whose every constant was measured frame-by-frame off a
-reference video — to the Waveshare ESP32-S3-Touch-AMOLED-1.75 (466x466 round
-AMOLED), rendered white-on-black.
+A port of [jeremy-prt/bloub](https://github.com/jeremy-prt/bloub) to an
+ESP32-S3 board with a 240x240 ST7789-compatible SPI LCD. The character is
+rendered white-on-black, with the original coloured ring, swoosh and comet
+accents.
 
-Thirteen states cycle on input: **idle, thinking, wink, wide, alert, notify,
-sleep, egg, hexagon, play, orbit, burst, comet**. Tap the touchscreen or press
-**BOOT** to advance. Each state loops its own animation, and states cross-fade
-into one another.
+Thirteen states play automatically: **idle, thinking, wink, wide, alert,
+notify, sleep, egg, hexagon, play, orbit, burst, comet**. Each state is shown
+for four seconds, including its transition, and the sequence then wraps back
+to idle.
 
 ## Hardware
 
-Waveshare ESP32-S3-Touch-AMOLED-1.75: CO5300 QSPI AMOLED, CST9217 capacitive
-touch, ESP32-S3R8. Pins live in `main/display.c`, `main/touch.c` and
-`main/boot_button.c`.
+The LCD configuration is taken from the working sibling project
+`../20_Camera`:
 
-## Build & flash
+| Signal | ESP32-S3 GPIO |
+| --- | ---: |
+| SPI SCLK | 12 |
+| SPI MOSI | 11 |
+| SPI MISO | 13 |
+| LCD CS | 48 |
+| LCD DC | 47 |
+| LCD RST | 21 |
+| LCD backlight | 40 |
+
+The display uses SPI2 at 60 MHz in mode 0. The backlight is active high.
+Camera, Wi-Fi, touch and button input are not used by this firmware.
+
+## Build and flash
+
+This project is configured and tested with ESP-IDF v6.0.2.
 
 ```bash
-. ~/esp/esp-idf/export.sh
+. /home/sqhh99/esp32/esp-idf/export.sh
 cd esp32-robot-face
-idf.py -p /dev/cu.usbmodem<NNNN> build flash monitor
+idf.py build
+idf.py -p <PORT> flash monitor
 ```
 
-Find the port with `ls /dev/cu.*` while the board is plugged in. If the port
-appears and disappears in a loop, hold **BOOT** while plugging the cable in to
-force ROM download mode.
+The serial log prints the active state, frame rate, updated band range and arc
+segment count every two seconds.
 
-## What was ported, and what wasn't
+## Rendering
 
-Carried over faithfully, because they are measurements rather than settings:
-the 64-sample radial profiles for the egg/hexagon/triangle bodies, the exact
-eye geometry and the sphere-tangent projection that gives them their volume
-(the eyes lean `\\`, not `//`), the blink schedule and its PRNG, the gaze
-drift, every state's timings and easings, and the orbit/swoosh/comet ring
-parameters.
+The project uses a small purpose-built RGB565 rasterizer rather than LVGL:
 
-Deliberately left out: the customiser's shape and expression overrides
-(`baseBody`/`baseFace` are inert without it), pointer-driven gaze (`Look` —
-there is no mouse), and the export/GIF/video paths.
+- The 64-sample body silhouette is converted to a polygon and scanline-filled.
+- Eyes are erased from the body over their small bounding boxes.
+- The 240x240 display is sent as 15 bands of 16 rows.
+- Two internal-SRAM buffers overlap rendering with SPI DMA transfers.
+- Only bands touched by the current or previous frame are refreshed.
+- Orbit and ribbon curves are rasterized as short capsule segments.
 
-Changed on purpose: the palette is inverted to white-on-black to suit an
-AMOLED, where black costs no power; the ring/swoosh/comet accents keep their
-original hues. The notification pastille is green rather than bloub's blue.
-The `exclaim` state was dropped.
+The renderer keeps colours in the byte order expected by the panel, so fades
+are composed before the final RGB565 byte swap.
 
-## How it's made fast
+## Reusing the face component
 
-The whole catalogue runs between 35 and 450 fps on one core. The things that
-mattered, in order of how much they bought:
+The animation and rasterizer live in the display-independent
+`components/grok_face` component. Its public `grok_face.h` API accepts the
+display dimensions, face geometry and two callbacks for acquiring and
+flushing RGB565 band buffers. It contains no LCD controller, GPIO or playback
+interval assumptions.
 
-- **The body is a filled polygon, not a per-pixel test.** bloub's `toPoints`
-  is ported verbatim and the resulting 64-gon is scanline-filled: per row a
-  handful of edge crossings and one flat 32-bit span write. The first version
-  tested every pixel with an `atan2f`/`sqrtf` against the radial profile — the
-  same picture, ~66k transcendental calls a frame, and unusably slow.
-- **Eyes are holes, punched not painted.** The body fills first, then the eye
-  interiors are erased back to the background over their own small bounding
-  boxes. That turned ~66k eye tests per frame (one per body pixel) into ~4k,
-  and it is also what clips an eye against the silhouette for free.
-- **Band buffers.** A full 466x464 frame does not fit internal SRAM, so the
-  screen goes out one 16-row band at a time, double-buffered, drawing the next
-  band while the previous one is in flight.
-- **Only the rows that can change.** Each frame computes what its content
-  actually reaches — body, dots, teardrop, pastille, and each arc's own
-  ellipse bound — and repaints only those bands, unioned with the previous
-  frame's so vacated bands get blanked exactly once. Sleep's bouncing dot
-  touches 4 bands of 29.
-- **Arc segments narrow per row.** A diagonal stroke fills a sliver of its
-  bounding box; solving the segment for the rows it crosses cuts the tested
-  area by about three times.
-- **Colours are panel-ordered once, at the point they are built.** This panel
-  takes RGB565 byte-swapped. White and black are palindromes, so the bug hid
-  until a saturated colour appeared and rendered orange instead of blue.
-  Fades are baked into a shape's colour once per frame, never per pixel.
-
-There is an fps line on the serial log every two seconds, with the state, the
-bands touched and the arc-segment count, so any future change here can be
-measured rather than guessed at.
+To use it in another ESP-IDF project, copy `components/grok_face`, provide
+the two display callbacks, call `grok_face_render_frame()` continuously and
+select expressions through `grok_face_set_expression()` or
+`grok_face_next_expression()`. See
+[`components/grok_face/README.md`](components/grok_face/README.md) for the
+complete buffer contract and integration example.
 
 ## Layout
 
-- `main/bloub_states.c` — the state catalogue: one `pose()` per state, plus
-  the cross-fade between them. Start here.
-- `main/bloub_engine.c` — the render pipeline and the state machine.
-- `main/bloub_shapes.c` — silhouettes, the scanline polygon, capsules.
-- `main/bloub_face.c` — eyes on a sphere, blink schedule, gaze drift.
-- `main/bloub_decor.c` — rings, swoosh, comet ribbons, burst particles.
-- `main/display.c` — CO5300 bring-up and the band-buffer DMA pipeline.
-- `main/touch.c`, `main/boot_button.c` — the two inputs.
-- `main/config.h` — geometry, colours, brightness.
+- `components/grok_face` - reusable animation and RGB565 rasterizer
+- `main/display.c` - ST7789 initialization and band-buffered SPI DMA
+- `main/main.c` - component wiring and four-second automatic state cycling
+- `main/config.h` - display geometry and playback settings
 
 ## Credits
 
-All of the character design and animation — the blob's shapes, expressions,
-timings, easings, and motion — comes from **[jeremy-prt/bloub](https://github.com/jeremy-prt/bloub)**.
-This project is a port of that work to ESP32-S3 hardware; the constants that
-give every state its feel were measured from and carried over faithfully from
-the original. Full credit and thanks to [Jeremy](https://github.com/jeremy-prt)
-for creating Bloub.
+All character design and animation - shapes, expressions, timings, easings and
+motion - comes from [jeremy-prt/bloub](https://github.com/jeremy-prt/bloub).
+This project ports that work to ESP32-S3 hardware.
