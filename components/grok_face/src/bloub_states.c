@@ -121,6 +121,29 @@ static void pose_alert(float t, pose_t *out)
     out->tear_opacity = 1.0f;
 }
 
+static void pose_exclaim(float t, pose_t *out)
+{
+    (void)t;
+    pose_base(out);
+    // The upright "!" is tapered, not a capsule: the hull of a r=0.132 disc at
+    // the top and a r=0.075 one at the bottom, so its profile is taken about
+    // (0, BAR_UPRIGHT_CY) rather than the origin.
+    sil_profile(&out->sil, BLOUB_PROFILE_BAR_UPRIGHT);
+    out->sil.cy = BAR_UPRIGHT_CY;
+    out->eye_alpha = 0.0f;
+
+    // Its dot IS a disc here, unlike the leaning "!"'s teardrop.
+    out->dot_count = 1;
+    out->dots[0] = (dot_render_t){
+        .x = -0.012f,
+        .y = 0.526f,
+        .r = 0.113f,
+        .opacity = 1.0f,
+        .has_depth = false,
+        .depth = 0.0f,
+    };
+}
+
 static void pose_notify(float t, pose_t *out)
 {
     pose_base(out);
@@ -274,29 +297,72 @@ static void pose_comet(float t, pose_t *out)
     }
 }
 
+/**
+ * Entry transition, and the ONLY state that was chosen rather than measured.
+ *
+ * It borrows orbit's vocabulary -- the same rings, with their measured
+ * parameters -- but cuts it short: three of the six, and gone inside 1.3s.
+ *
+ * Both flags matter here. `base_body` lets a chosen shape replace the body, so
+ * a pebble or a droplet morphs into this instead of jumping; `base_face` makes
+ * it wear the resting face, so an aimed gaze applies from this state on. A
+ * state with a gaze pose of its own would hand back mid-course and the eyes
+ * would jump on the resume.
+ */
+static void pose_swirl(float t, pose_t *out)
+{
+    pose_base(out);
+    out->arc_count = 3;
+    out->arc_t = t;
+    for (int i = 0; i < 3; i++) {
+        out->arcs[i] = BLOUB_RINGS[i];
+        // They come in one after another, then clear before the block ends, so
+        // the return to rest happens on an already-clean frame.
+        out->arc_opacity[i] = bloub_clamp01((t - (float)i * 0.06f) / 0.14f) *
+                              bloub_clamp01((1.22f - t) / 0.34f);
+    }
+}
+
 typedef void (*pose_fn_t)(float t, pose_t *out);
 
 static const pose_fn_t POSE_FNS[STATE_COUNT] = {
     [STATE_IDLE] = pose_idle,       [STATE_THINKING] = pose_thinking, [STATE_WINK] = pose_wink,
     [STATE_WIDE] = pose_wide,       [STATE_ALERT] = pose_alert,       [STATE_NOTIFY] = pose_notify,
-    [STATE_SLEEP] = pose_sleep,     [STATE_EGG] = pose_egg,
+    [STATE_EXCLAIM] = pose_exclaim, [STATE_SLEEP] = pose_sleep,       [STATE_EGG] = pose_egg,
     [STATE_HEXAGON] = pose_hexagon, [STATE_PLAY] = pose_play,         [STATE_ORBIT] = pose_orbit,
-    [STATE_BURST] = pose_burst,     [STATE_COMET] = pose_comet,
+    [STATE_BURST] = pose_burst,     [STATE_COMET] = pose_comet,       [STATE_SWIRL] = pose_swirl,
 };
 
 static const bool BLINK_IN[STATE_COUNT] = {
     [STATE_IDLE] = false,   [STATE_THINKING] = true, [STATE_WINK] = true,    [STATE_WIDE] = true,
-    [STATE_ALERT] = false,  [STATE_NOTIFY] = true,   [STATE_SLEEP] = false,
-    [STATE_EGG] = true,     [STATE_HEXAGON] = true,  [STATE_PLAY] = true,    [STATE_ORBIT] = false,
-    [STATE_BURST] = false,  [STATE_COMET] = false,
+    [STATE_ALERT] = false,  [STATE_NOTIFY] = true,   [STATE_EXCLAIM] = false,
+    [STATE_SLEEP] = false,  [STATE_EGG] = true,      [STATE_HEXAGON] = true, [STATE_PLAY] = true,
+    [STATE_ORBIT] = false,  [STATE_BURST] = false,   [STATE_COMET] = false,
+    // the shape morph is masked by a blink, as everywhere else
+    [STATE_SWIRL] = true,
+};
+
+// True where the silhouette is the RESTING body, so a chosen shape may replace
+// it. False wherever the state draws its own shape: there the silhouette IS the
+// animation and overwriting it would delete the state.
+static const bool BASE_BODY[STATE_COUNT] = {
+    [STATE_IDLE] = true,    [STATE_WINK] = true,     [STATE_WIDE] = true,
+    [STATE_NOTIFY] = true,  [STATE_SWIRL] = true,
+};
+
+// True where the state wears the RESTING face. Only these two: every other
+// state with a face has one measured off the video, and that is the point.
+static const bool BASE_FACE[STATE_COUNT] = {
+    [STATE_IDLE] = true,    [STATE_SWIRL] = true,
 };
 
 // bloub's per-state `morph`: how long the cross-fade into this state runs.
 static const float MORPH[STATE_COUNT] = {
     [STATE_IDLE] = 0.45f,   [STATE_THINKING] = 0.4f, [STATE_WINK] = 0.3f,  [STATE_WIDE] = 0.55f,
-    [STATE_ALERT] = 0.45f,  [STATE_NOTIFY] = 0.5f,   [STATE_SLEEP] = 0.5f,
-    [STATE_EGG] = 0.4f,     [STATE_HEXAGON] = 0.4f,  [STATE_PLAY] = 0.5f,  [STATE_ORBIT] = 0.6f,
-    [STATE_BURST] = 0.4f,   [STATE_COMET] = 0.45f,
+    [STATE_ALERT] = 0.45f,  [STATE_NOTIFY] = 0.5f,   [STATE_EXCLAIM] = 0.45f,
+    [STATE_SLEEP] = 0.5f,   [STATE_EGG] = 0.4f,      [STATE_HEXAGON] = 0.4f,
+    [STATE_PLAY] = 0.5f,    [STATE_ORBIT] = 0.6f,    [STATE_BURST] = 0.4f, [STATE_COMET] = 0.45f,
+    [STATE_SWIRL] = 0.3f,
 };
 
 // The reference's own `duration` per state, used only where a state's
@@ -315,17 +381,20 @@ static const float MORPH[STATE_COUNT] = {
 static const float LOOP_PERIOD[STATE_COUNT] = {
     [STATE_IDLE] = 0.0f,     [STATE_THINKING] = 0.0f, [STATE_WINK] = 0.0f,
     [STATE_WIDE] = 0.0f,     [STATE_ALERT] = 2.4f,    [STATE_NOTIFY] = 2.2f,
-    [STATE_SLEEP] = 0.0f,    [STATE_EGG] = 0.0f,
+    [STATE_EXCLAIM] = 0.0f,  [STATE_SLEEP] = 0.0f,    [STATE_EGG] = 0.0f,
     [STATE_HEXAGON] = 0.0f,  [STATE_PLAY] = 2.2f,     [STATE_ORBIT] = 3.6f,
     [STATE_BURST] = 2.6f,    [STATE_COMET] = 2.4f,
+    // swirl is a transition, not something to hold: its rings play once and
+    // clear, leaving the resting face. Replaying them would make it a pulse.
+    [STATE_SWIRL] = 0.0f,
 };
 
 static const char *STATE_NAMES[STATE_COUNT] = {
     [STATE_IDLE] = "idle",       [STATE_THINKING] = "thinking", [STATE_WINK] = "wink",
     [STATE_WIDE] = "wide",       [STATE_ALERT] = "alert",       [STATE_NOTIFY] = "notify",
-    [STATE_SLEEP] = "sleep",     [STATE_EGG] = "egg",
+    [STATE_EXCLAIM] = "exclaim", [STATE_SLEEP] = "sleep",       [STATE_EGG] = "egg",
     [STATE_HEXAGON] = "hexagon", [STATE_PLAY] = "play",         [STATE_ORBIT] = "orbit",
-    [STATE_BURST] = "burst",     [STATE_COMET] = "comet",
+    [STATE_BURST] = "burst",     [STATE_COMET] = "comet",       [STATE_SWIRL] = "swirl",
 };
 
 void bloub_pose_sample(bloub_state_id_t id, float t, pose_t *out)
@@ -336,6 +405,16 @@ void bloub_pose_sample(bloub_state_id_t id, float t, pose_t *out)
 bool bloub_state_blink_in(bloub_state_id_t id)
 {
     return BLINK_IN[id];
+}
+
+bool bloub_state_base_body(bloub_state_id_t id)
+{
+    return BASE_BODY[id];
+}
+
+bool bloub_state_base_face(bloub_state_id_t id)
+{
+    return BASE_FACE[id];
 }
 
 float bloub_state_loop_period(bloub_state_id_t id)
@@ -354,6 +433,7 @@ static eye_cfg_t lerp_eye(const eye_cfg_t *a, const eye_cfg_t *b, float t)
         .w = bloub_lerp(a->w, b->w, t),
         .h = bloub_lerp(a->h, b->h, t),
         .open = bloub_lerp(a->open, b->open, t),
+        .tilt = bloub_lerp(a->tilt, b->tilt, t),
     };
 }
 
