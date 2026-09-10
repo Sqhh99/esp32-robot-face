@@ -30,21 +30,16 @@
 #define BALL_R 75.0f
 
 // ---------------------------------------------------------------------------
-// Playback
+// Buttons
 // ---------------------------------------------------------------------------
 
-// The demo walks all four axes at once. The four periods are pairwise coprime
-// so the combinations keep changing instead of settling into a short pattern:
-// it takes 4*7*11*13 seconds to repeat.
-//
-// Shape and expression only SHOW on the states that carry the resting body and
-// the resting face (idle, wink, wide, notify -- and idle alone for the face).
-// Everywhere else the silhouette is the animation, so it is left alone. Seeing
-// them change only some of the time is the correct behaviour, not a fault.
-#define STATE_HOLD_MS 4000
-#define EXPR_HOLD_MS 7000
-#define SHAPE_HOLD_MS 11000
-#define COLOR_HOLD_MS 13000
+// Active-low buttons. These pins overlap the camera D4-D7 bus used by the
+// sibling camera example, but that interface is not enabled in this project.
+#define KEY1_GPIO 15
+#define KEY2_GPIO 16
+#define KEY3_GPIO 17
+#define KEY4_GPIO 18
+#define KEY_DEBOUNCE_MS 20
 
 // Page colour behind the avatar, native RGB565. Black suits the panel; note
 // that GROK_FACE_COLOR_ENCRE (#0a0a0c) is meant for a light page and will be

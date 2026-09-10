@@ -19,8 +19,21 @@ because there the silhouette *is* the animation. Only `idle`, `wink`, `wide`,
 `notify` and `swirl` take a shape, and only `idle` and `swirl` take an
 expression. That is the original's rule, not a limitation of the port.
 
-The demo firmware walks all four at once, on pairwise-coprime periods (4, 7, 11
-and 13 seconds) so the combinations keep changing.
+The demo firmware maps the four axes to four active-low, debounced buttons:
+
+| Button | GPIO | Action |
+| --- | ---: | --- |
+| KEY1 | 15 | Next resting expression (cycles all 16) |
+| KEY2 | 16 | Next resting body shape |
+| KEY3 | 17 | Next body colour |
+| KEY4 | 18 | Next state (cycles 14 catalogue states plus swirl) |
+
+Button polling is non-blocking so holding a key does not pause the LCD
+animation. One press generates one change after a 20 ms debounce. KEY1 and
+KEY2 return to `idle` so their resting expression or shape is immediately
+visible instead of being hidden by a state-specific pose. KEY4 keeps its own
+cycle cursor, so these temporary returns to `idle` do not restart the 15-state
+sequence.
 
 ## Hardware
 
@@ -36,9 +49,15 @@ The LCD configuration is taken from the working sibling project
 | LCD DC | 47 |
 | LCD RST | 21 |
 | LCD backlight | 40 |
+| KEY1 | 15 |
+| KEY2 | 16 |
+| KEY3 | 17 |
+| KEY4 | 18 |
 
 The display uses SPI2 at 60 MHz in mode 0. The backlight is active high.
-Camera, Wi-Fi, touch and button input are not used by this firmware.
+Camera, Wi-Fi and touch are not used by this firmware. GPIO15-18 are also the
+camera D4-D7 pins in `../20_Camera`, so the buttons and that camera interface
+cannot be enabled at the same time.
 
 ## Build and flash
 
@@ -127,8 +146,9 @@ complete buffer contract and integration example.
 - `components/grok_face` - reusable animation and RGB565 rasterizer
 - `tools/gen_bloub_tables.py` - generates the shape and eye-fit tables
 - `main/display.c` - ST7789 initialization and band-buffered SPI DMA
-- `main/main.c` - component wiring and the four-axis demo cycle
-- `main/config.h` - display geometry and playback settings
+- `main/main.c` - component wiring and four-axis button actions
+- `main/keys.c` - active-low GPIO inputs and non-blocking debounce
+- `main/config.h` - display geometry and background colour
 
 ## Credits
 

@@ -1,19 +1,18 @@
 // Bloub on the board's 240x240 ST7789 LCD.
 //
-// The demo drives all four of the component's axes at once: the animated state,
-// the resting expression, the resting body shape and the body colour, each on
-// its own period.
+// The four board keys drive the component's independent animation axes.
 
 #include "config.h"
 #include "display.h"
 #include "esp_err.h"
 #include "esp_log.h"
-#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "grok_face.h"
+#include "keys.h"
 
 static const char *TAG = "grok_face_app";
+static grok_face_state_t s_state_cycle_cursor = GROK_FACE_STATE_IDLE;
 
 static uint16_t *face_acquire_buffer(void *user_ctx)
 {
@@ -28,14 +27,43 @@ static esp_err_t face_flush_band(void *user_ctx, int y_start, int row_count,
     return display_flush_rows(y_start, row_count, pixels);
 }
 
-/** A deadline that has come round, rearmed for the next one. */
-static bool due(int64_t now_us, int64_t *next_us, int period_ms)
+static void handle_key(key_event_t key)
 {
-    if (now_us < *next_us) {
-        return false;
+    switch (key) {
+    case KEY_EVENT_1: {
+        grok_face_expression_t expression = (grok_face_expression_t)(
+            (grok_face_get_expression() + 1) % GROK_FACE_EXPR_COUNT);
+        ESP_ERROR_CHECK(grok_face_set_state(GROK_FACE_STATE_IDLE));
+        ESP_ERROR_CHECK(grok_face_set_expression(expression));
+        ESP_LOGI(TAG, "KEY1: expression -> %s", grok_face_expression_name(expression));
+        break;
     }
-    *next_us = now_us + (int64_t)period_ms * 1000;
-    return true;
+    case KEY_EVENT_2: {
+        grok_face_shape_t shape =
+            (grok_face_shape_t)((grok_face_get_shape() + 1) % GROK_FACE_SHAPE_COUNT);
+        ESP_ERROR_CHECK(grok_face_set_state(GROK_FACE_STATE_IDLE));
+        ESP_ERROR_CHECK(grok_face_set_shape(shape));
+        ESP_LOGI(TAG, "KEY2: shape -> %s", grok_face_shape_name(shape));
+        break;
+    }
+    case KEY_EVENT_3: {
+        grok_face_color_t color =
+            (grok_face_color_t)((grok_face_get_color() + 1) % GROK_FACE_COLOR_COUNT);
+        ESP_ERROR_CHECK(grok_face_set_color(color));
+        ESP_LOGI(TAG, "KEY3: color -> %s", grok_face_color_name(color));
+        break;
+    }
+    case KEY_EVENT_4: {
+        s_state_cycle_cursor =
+            (grok_face_state_t)((s_state_cycle_cursor + 1) % GROK_FACE_STATE_COUNT);
+        ESP_ERROR_CHECK(grok_face_set_state(s_state_cycle_cursor));
+        ESP_LOGI(TAG, "KEY4: state -> %s", grok_face_state_name(s_state_cycle_cursor));
+        break;
+    }
+    case KEY_EVENT_NONE:
+    default:
+        break;
+    }
 }
 
 void app_main(void)
@@ -57,6 +85,7 @@ void app_main(void)
         .user_ctx = NULL,
     };
     ESP_ERROR_CHECK(grok_face_init(&face_config));
+    ESP_ERROR_CHECK(keys_init());
     ESP_ERROR_CHECK(display_set_backlight(true));
 
     // Start on a resting expression and shape so the two customiser axes are
@@ -64,35 +93,9 @@ void app_main(void)
     ESP_ERROR_CHECK(grok_face_set_expression(GROK_FACE_EXPR_NEUTRE));
     ESP_ERROR_CHECK(grok_face_set_shape(GROK_FACE_SHAPE_CERCLE));
 
-    int expression = GROK_FACE_EXPR_NEUTRE;
-    int shape = GROK_FACE_SHAPE_CERCLE;
-    int color = grok_face_get_color();
-
-    const int64_t start_us = esp_timer_get_time();
-    int64_t next_state_us = start_us + (int64_t)STATE_HOLD_MS * 1000;
-    int64_t next_expr_us = start_us + (int64_t)EXPR_HOLD_MS * 1000;
-    int64_t next_shape_us = start_us + (int64_t)SHAPE_HOLD_MS * 1000;
-    int64_t next_color_us = start_us + (int64_t)COLOR_HOLD_MS * 1000;
-
     for (;;) {
         ESP_ERROR_CHECK(grok_face_render_frame());
-
-        const int64_t now_us = esp_timer_get_time();
-        if (due(now_us, &next_state_us, STATE_HOLD_MS)) {
-            ESP_ERROR_CHECK(grok_face_next_state());
-        }
-        if (due(now_us, &next_expr_us, EXPR_HOLD_MS)) {
-            expression = (expression + 1) % GROK_FACE_EXPR_COUNT;
-            ESP_ERROR_CHECK(grok_face_set_expression(expression));
-        }
-        if (due(now_us, &next_shape_us, SHAPE_HOLD_MS)) {
-            shape = (shape + 1) % GROK_FACE_SHAPE_COUNT;
-            ESP_ERROR_CHECK(grok_face_set_shape(shape));
-        }
-        if (due(now_us, &next_color_us, COLOR_HOLD_MS)) {
-            color = (color + 1) % GROK_FACE_COLOR_COUNT;
-            ESP_ERROR_CHECK(grok_face_set_color(color));
-        }
+        handle_key(keys_poll());
 
         // DMA waits pace rendering; this also guarantees idle-task time.
         vTaskDelay(1);
