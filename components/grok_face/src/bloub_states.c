@@ -13,8 +13,8 @@ static void pose_base(pose_t *out)
     out->off_y = 0.0f;
     out->gaze = BLOUB_REST_GAZE;
     out->split = EYE_SPLIT;
-    out->eyes[0] = (eye_cfg_t){EYE_W, EYE_H, 1.0f};
-    out->eyes[1] = (eye_cfg_t){EYE_W, EYE_H, 1.0f};
+    out->eyes[0] = (eye_cfg_t){.w = EYE_W, .h = EYE_H, .open = 1.0f, .tilt = 0.0f};
+    out->eyes[1] = (eye_cfg_t){.w = EYE_W, .h = EYE_H, .open = 1.0f, .tilt = 0.0f};
     out->eye_alpha = 1.0f;
     out->dot_count = 0;
     out->dots_behind = false;
@@ -75,8 +75,10 @@ static void pose_wink(float t, pose_t *out)
     out->split = 16.25f;
     // The closed eye is a dash WIDER than the open one (0.447 vs 0.236), not
     // the open eye squashed.
-    out->eyes[0] = (eye_cfg_t){0.236f, 0.464f, 1.0f};
-    out->eyes[1] = (eye_cfg_t){0.447f, 0.089f, 1.0f};
+    out->eyes[0] =
+        (eye_cfg_t){.w = 0.236f, .h = 0.464f, .open = 1.0f, .tilt = 0.0f};
+    out->eyes[1] =
+        (eye_cfg_t){.w = 0.447f, .h = 0.089f, .open = 1.0f, .tilt = 0.0f};
 }
 
 static void pose_wide(float t, pose_t *out)
@@ -85,7 +87,8 @@ static void pose_wide(float t, pose_t *out)
     pose_base(out);
     out->gaze = (head_gaze_t){6.92f, -21.96f, 11.6f};
     out->split = 18.43f;
-    out->eyes[0] = out->eyes[1] = (eye_cfg_t){0.356f, 0.875f, 1.0f};
+    out->eyes[0] = out->eyes[1] =
+        (eye_cfg_t){.w = 0.356f, .h = 0.875f, .open = 1.0f, .tilt = 0.0f};
 }
 
 static void pose_alert(float t, pose_t *out)
@@ -155,7 +158,8 @@ static void pose_notify(float t, pose_t *out)
 
     out->gaze = (head_gaze_t){-21.94f, -5.82f, -12.2f};
     out->split = 18.89f;
-    out->eyes[0] = out->eyes[1] = (eye_cfg_t){0.505f, 0.498f, 1.0f};
+    out->eyes[0] = out->eyes[1] =
+        (eye_cfg_t){.w = 0.505f, .h = 0.498f, .open = 1.0f, .tilt = 0.0f};
     out->has_notif = true;
     out->notif_x = cosf(a) * NOTIF_DIST;
     out->notif_y = sinf(a) * NOTIF_DIST;
@@ -179,7 +183,8 @@ static void pose_egg(float t, pose_t *out)
     sil_profile(&out->sil, BLOUB_PROFILE_EGG);
     out->gaze = (head_gaze_t){19.97f, 26.01f, -17.1f};
     out->split = 11.07f;
-    out->eyes[0] = out->eyes[1] = (eye_cfg_t){0.164f, 0.385f, 1.0f};
+    out->eyes[0] = out->eyes[1] =
+        (eye_cfg_t){.w = 0.164f, .h = 0.385f, .open = 1.0f, .tilt = 0.0f};
 }
 
 static void pose_hexagon(float t, pose_t *out)
@@ -189,7 +194,8 @@ static void pose_hexagon(float t, pose_t *out)
     sil_profile(&out->sil, BLOUB_PROFILE_HEXAGON);
     out->gaze = (head_gaze_t){23.11f, 24.42f, -13.3f};
     out->split = 13.37f;
-    out->eyes[0] = out->eyes[1] = (eye_cfg_t){0.177f, 0.411f, 1.0f};
+    out->eyes[0] = out->eyes[1] =
+        (eye_cfg_t){.w = 0.177f, .h = 0.411f, .open = 1.0f, .tilt = 0.0f};
 }
 
 /**
@@ -214,7 +220,8 @@ static void pose_play(float t, pose_t *out)
     spinning_triangle(0.0f, &out->sil);
     out->gaze = (head_gaze_t){12.0f, -8.0f, -6.0f};
     out->split = 15.0f;
-    out->eyes[0] = out->eyes[1] = (eye_cfg_t){0.18f, 0.34f, 1.0f};
+    out->eyes[0] = out->eyes[1] =
+        (eye_cfg_t){.w = 0.18f, .h = 0.34f, .open = 1.0f, .tilt = 0.0f};
 
     out->arc_count = 4;
     out->arc_t = t;
@@ -254,7 +261,12 @@ static void pose_orbit(float t, pose_t *out)
     out->gaze.yaw = BLOUB_REST_GAZE.yaw + sinf(t * 6.5f) * 65.0f * (1.0f - back);
     out->gaze.pitch = -4.0f + back * 32.0f;
     out->gaze.roll = -13.0f;
-    out->eyes[0] = out->eyes[1] = (eye_cfg_t){0.18f, 0.34f + back * 0.07f, 1.0f};
+    out->eyes[0] = out->eyes[1] = (eye_cfg_t){
+        .w = 0.18f,
+        .h = 0.34f + back * 0.07f,
+        .open = 1.0f,
+        .tilt = 0.0f,
+    };
 
     out->arc_count = 6;
     out->arc_t = t;
